@@ -45,7 +45,7 @@ sistema_analise_alarmes/
 
 - Python 3.9 ou superior
 - PostgreSQL 12 ou superior
-- Acesso ao banco de dados ATI_IVI_Backup
+- Acesso ao banco de dados
 
 ## Instalação
 
