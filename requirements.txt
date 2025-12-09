@@ -1,0 +1,26 @@
+# ============================================================================
+# Dependências do Sistema de Análise de Alarmes (SAA)
+# ============================================================================
+
+# Framework Web
+streamlit==1.29.0
+
+# Banco de Dados
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.9
+
+# Visualização de Dados
+pyecharts==2.0.4
+streamlit-echarts==0.4.0   # versão estável compatível
+plotly==5.18.0
+
+# Manipulação de Dados
+pandas==2.1.4
+numpy==1.26.2
+
+# Utilitários
+python-dateutil==2.8.2
+pytz==2023.3
+
+# Tratamento de Strings
+unidecode==1.3.7
