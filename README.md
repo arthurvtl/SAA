@@ -78,11 +78,6 @@ Edite o arquivo `config.py` e ajuste a variável `DATABASE_URL` conforme necess�
 DATABASE_URL = "postgresql+psycopg2://usuario:senha@host:porta/banco"
 ```
 
-**Exemplo:**
-```python
-DATABASE_URL = "postgresql+psycopg2://postgres:arthur@localhost:5432/ATI_IVI_Backup"
-```
-
 ## Execução
 
 ### Executar o Sistema
