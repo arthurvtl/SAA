@@ -48,7 +48,7 @@ def criar_grafico_pizza_severidade(dataframe: pd.DataFrame) -> Dict[str, Any]:
         {
             "name": row['severidade_nome'],
             "value": round(row['duracao_total_minutos'], 2),
-            "itemStyle": {"color": row['severidade_cor']}
+            "itemStyle": {"color": CORES_SEVERIDADE.get(row['severidade_id'], row['severidade_cor'])}
         }
         for _, row in dataframe.iterrows()
     ]

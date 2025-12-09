@@ -675,6 +675,7 @@ def obter_tempo_por_severidade(
     
     query_sql = f"""
         SELECT
+            asev.id AS severidade_id,
             asev.name AS severidade_nome,
             asev.color AS severidade_cor,
             asev.level AS severidade_level,
@@ -1243,23 +1244,79 @@ def obter_alarmes_trackers(
     union_tabelas = construir_union_all_tabelas(usina_id, periodos)
     
     query_sql = f"""
+        WITH alarmes_tracker AS (
+            -- Passo 1: Buscar todos os alarmes de trackers com timestamps normalizados
+            SELECT
+                SPLIT_PART(toc.name, ' - ', 1) AS tracker_code,
+                a.date_time AS inicio,
+                COALESCE(a.clear_date, NOW()) AS fim,
+                a.id AS alarm_id
+            FROM (
+                {union_tabelas}
+            ) a
+            JOIN public.tele_object tobj ON a.tele_object_id = tobj.id
+            JOIN public.tele_object_config toc ON tobj.tele_object_config_id = toc.id
+            WHERE a.power_station_id = :usina_id
+            AND toc.name LIKE 'TR-%'
+        ),
+        alarmes_ordenados AS (
+            -- Passo 2: Ordenar por tracker e horário de início
+            SELECT
+                tracker_code,
+                inicio,
+                fim,
+                alarm_id,
+                LAG(fim) OVER (PARTITION BY tracker_code ORDER BY inicio) AS fim_anterior
+            FROM alarmes_tracker
+        ),
+        grupos_sobrepostos AS (
+            -- Passo 3: Detectar início de novo grupo (quando não há sobreposição)
+            SELECT
+                tracker_code,
+                inicio,
+                fim,
+                alarm_id,
+                fim_anterior,
+                -- Cria um novo grupo quando o início do alarme atual é DEPOIS do fim do anterior
+                -- ou quando é o primeiro alarme do tracker (fim_anterior IS NULL)
+                CASE 
+                    WHEN fim_anterior IS NULL THEN 1
+                    WHEN inicio > fim_anterior THEN 1
+                    ELSE 0
+                END AS novo_grupo
+            FROM alarmes_ordenados
+        ),
+        grupos_numerados AS (
+            -- Passo 4: Numerar os grupos usando soma cumulativa
+            SELECT
+                tracker_code,
+                inicio,
+                fim,
+                alarm_id,
+                SUM(novo_grupo) OVER (PARTITION BY tracker_code ORDER BY inicio) AS grupo_id
+            FROM grupos_sobrepostos
+        ),
+        intervalos_fundidos AS (
+            -- Passo 5: Fundir intervalos dentro de cada grupo
+            SELECT
+                tracker_code,
+                grupo_id,
+                MIN(inicio) AS inicio_intervalo,
+                MAX(fim) AS fim_intervalo,
+                COUNT(alarm_id) AS qtd_alarmes_no_intervalo
+            FROM grupos_numerados
+            GROUP BY tracker_code, grupo_id
+        )
+        -- Passo 6: Resultado final - somar duração dos intervalos fundidos
         SELECT
-            SPLIT_PART(toc.name, ' - ', 1) AS tracker_code,
-            COUNT(a.id) AS quantidade_alarmes,
+            tracker_code,
+            SUM(qtd_alarmes_no_intervalo) AS quantidade_alarmes,
             ROUND(
                 SUM(
-                    EXTRACT(EPOCH FROM (
-                        COALESCE(a.clear_date, NOW()) - a.date_time
-                    )) / 60
+                    EXTRACT(EPOCH FROM (fim_intervalo - inicio_intervalo)) / 60
                 ), 2
             ) AS duracao_total_minutos
-        FROM (
-            {union_tabelas}
-        ) a
-        JOIN public.tele_object tobj ON a.tele_object_id = tobj.id
-        JOIN public.tele_object_config toc ON tobj.tele_object_config_id = toc.id
-        WHERE a.power_station_id = :usina_id
-        AND toc.name LIKE 'TR-%'
+        FROM intervalos_fundidos
         GROUP BY tracker_code
         ORDER BY duracao_total_minutos DESC
         LIMIT :limite

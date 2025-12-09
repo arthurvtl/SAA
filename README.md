@@ -45,7 +45,7 @@ sistema_analise_alarmes/
 
 - Python 3.9 ou superior
 - PostgreSQL 12 ou superior
-- Acesso ao banco de dados ATI_IVI_Backup
+- Acesso ao banco de dados
 
 ## Instalação
 
@@ -76,11 +76,6 @@ Edite o arquivo `config.py` e ajuste a variável `DATABASE_URL` conforme necess�
 
 ```python
 DATABASE_URL = "postgresql+psycopg2://usuario:senha@host:porta/banco"
-```
-
-**Exemplo:**
-```python
-DATABASE_URL = "postgresql+psycopg2://postgres:arthur@localhost:5432/ATI_IVI_Backup"
 ```
 
 ## Execução
