@@ -6,7 +6,6 @@ Sistema de Business Intelligence desenvolvido em Python + Streamlit para anális
 
 ## Características Principais
 
-- ✅ **Todo código em Português Brasileiro** (variáveis, funções, comentários)
 - ✅ **Queries SQL otimizadas** com índices e UNION ALL eficiente
 - ✅ **Código modular** separado em módulos específicos
 - ✅ **Clean Code** com funções pequenas e responsabilidade única
@@ -199,22 +198,5 @@ sqlalchemy.exc.OperationalError: (psycopg2.OperationalError) could not connect t
 1. Verifique se o PostgreSQL está rodando
 2. Verifique as credenciais em `config.py`
 3. Verifique se o host/porta estão corretos
-
-### Erro "Tabela não encontrada"
-
-```
-sqlalchemy.exc.ProgrammingError: relation "alarm_X_Y_Z" does not exist
-```
-
-**Solução:**
-1. Verifique se a usina/ano/mês selecionados possuem dados
-2. O sistema só exibe meses disponíveis, mas em caso de exclusão de tabelas, pode ocorrer este erro
-
-### Performance Lenta
-
-**Soluções:**
-1. Limite a consulta a no máximo 3 meses
-2. Verifique os índices no banco de dados (ver documentação de queries)
-3. Considere fazer cache de consultas frequentes
 
 
