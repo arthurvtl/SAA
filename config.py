@@ -13,7 +13,7 @@ from typing import Final
 # ============================================================================
 
 # URL de conexão com PostgreSQL
-DATABASE_URL: Final[str] = "postgresql+psycopg2://postgres:arthur@localhost:5432/ATI_IVI_Backup"
+DATABASE_URL: Final[str] = "BANCO DE DADOS"
 
 
 # ============================================================================

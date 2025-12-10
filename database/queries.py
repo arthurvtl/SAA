@@ -1221,10 +1221,18 @@ def obter_alarmes_trackers(
     limite: int = LIMITE_TOP_20
 ) -> pd.DataFrame:
     """
-    Obtém tempo total alarmado por Tracker (TR-XXX).
+    Obtém tempo total alarmado por Tracker (TR-XXX) com aglutinação de intervalos.
     
     Agrupa todos os teleobjetos que começam com o mesmo prefixo TR-XXX,
-    somando o tempo total alarmado de cada tracker.
+    somando o tempo total alarmado de cada tracker SEM DUPLICIDADE.
+    
+    IMPORTANTE: Usa SUBQUERIES ANINHADAS para fundir intervalos sobrepostos.
+    Se um tracker tem múltiplos alarmes simultâneos, o tempo é contado apenas UMA vez.
+    
+    Exemplo de aglutinação:
+        - Alarme A: 12:00-15:00 (3h)
+        - Alarme B: 13:00-15:00 (2h) 
+        - Tempo real: 3h (não 5h!)
     
     Parâmetros:
         usina_id: ID da usina
@@ -1243,72 +1251,26 @@ def obter_alarmes_trackers(
     """
     union_tabelas = construir_union_all_tabelas(usina_id, periodos)
     
+    # ========================================================================
+    # QUERY COM SUBQUERIES ANINHADAS (6 NÍVEIS)
+    # ========================================================================
+    # Estratégia: Cada nível anterior é uma subquery do próximo
+    # Lógica de dentro para fora:
+    #   1. alarmes_tracker (mais interno) - Extrai dados brutos
+    #   2. alarmes_ordenados - Adiciona LAG() para detectar sobreposição
+    #   3. grupos_sobrepostos - Marca início de novos grupos
+    #   4. grupos_numerados - Numera grupos com SUM() OVER
+    #   5. intervalos_fundidos - Agrupa e funde intervalos
+    #   6. SELECT final (mais externo) - Soma durações finais
+    # ========================================================================
+    
     query_sql = f"""
-        WITH alarmes_tracker AS (
-            -- Passo 1: Buscar todos os alarmes de trackers com timestamps normalizados
-            SELECT
-                SPLIT_PART(toc.name, ' - ', 1) AS tracker_code,
-                a.date_time AS inicio,
-                COALESCE(a.clear_date, NOW()) AS fim,
-                a.id AS alarm_id
-            FROM (
-                {union_tabelas}
-            ) a
-            JOIN public.tele_object tobj ON a.tele_object_id = tobj.id
-            JOIN public.tele_object_config toc ON tobj.tele_object_config_id = toc.id
-            WHERE a.power_station_id = :usina_id
-            AND toc.name LIKE 'TR-%'
-        ),
-        alarmes_ordenados AS (
-            -- Passo 2: Ordenar por tracker e horário de início
-            SELECT
-                tracker_code,
-                inicio,
-                fim,
-                alarm_id,
-                LAG(fim) OVER (PARTITION BY tracker_code ORDER BY inicio) AS fim_anterior
-            FROM alarmes_tracker
-        ),
-        grupos_sobrepostos AS (
-            -- Passo 3: Detectar início de novo grupo (quando não há sobreposição)
-            SELECT
-                tracker_code,
-                inicio,
-                fim,
-                alarm_id,
-                fim_anterior,
-                -- Cria um novo grupo quando o início do alarme atual é DEPOIS do fim do anterior
-                -- ou quando é o primeiro alarme do tracker (fim_anterior IS NULL)
-                CASE 
-                    WHEN fim_anterior IS NULL THEN 1
-                    WHEN inicio > fim_anterior THEN 1
-                    ELSE 0
-                END AS novo_grupo
-            FROM alarmes_ordenados
-        ),
-        grupos_numerados AS (
-            -- Passo 4: Numerar os grupos usando soma cumulativa
-            SELECT
-                tracker_code,
-                inicio,
-                fim,
-                alarm_id,
-                SUM(novo_grupo) OVER (PARTITION BY tracker_code ORDER BY inicio) AS grupo_id
-            FROM grupos_sobrepostos
-        ),
-        intervalos_fundidos AS (
-            -- Passo 5: Fundir intervalos dentro de cada grupo
-            SELECT
-                tracker_code,
-                grupo_id,
-                MIN(inicio) AS inicio_intervalo,
-                MAX(fim) AS fim_intervalo,
-                COUNT(alarm_id) AS qtd_alarmes_no_intervalo
-            FROM grupos_numerados
-            GROUP BY tracker_code, grupo_id
-        )
-        -- Passo 6: Resultado final - somar duração dos intervalos fundidos
-        SELECT
+        SELECT 
+            -- ================================================================
+            -- NÍVEL 6 (MAIS EXTERNO): AGREGAÇÃO FINAL POR TRACKER
+            -- ================================================================
+            -- Aqui somamos o tempo total de todos os intervalos fundidos
+            -- Cada tracker pode ter múltiplos intervalos fundidos (gaps entre alarmes)
             tracker_code,
             SUM(qtd_alarmes_no_intervalo) AS quantidade_alarmes,
             ROUND(
@@ -1316,7 +1278,104 @@ def obter_alarmes_trackers(
                     EXTRACT(EPOCH FROM (fim_intervalo - inicio_intervalo)) / 60
                 ), 2
             ) AS duracao_total_minutos
-        FROM intervalos_fundidos
+        FROM (
+            -- ================================================================
+            -- NÍVEL 5: FUSÃO DE INTERVALOS DENTRO DE CADA GRUPO
+            -- ================================================================
+            -- Para cada grupo_id (intervalos sobrepostos):
+            --   - MIN(inicio): Pega o início do primeiro alarme do grupo
+            --   - MAX(fim): Pega o fim do último alarme do grupo
+            -- Resultado: Um único intervalo fundido por grupo
+            SELECT
+                tracker_code,
+                grupo_id,
+                MIN(inicio) AS inicio_intervalo,
+                MAX(fim) AS fim_intervalo,
+                COUNT(alarm_id) AS qtd_alarmes_no_intervalo
+            FROM (
+                -- ============================================================
+                -- NÍVEL 4: NUMERAÇÃO DE GRUPOS
+                -- ============================================================
+                -- Usa SUM(novo_grupo) OVER para numerar grupos sequencialmente
+                -- Alarmes com mesmo grupo_id estão sobrepostos
+                -- Exemplo:
+                --   novo_grupo: 1, 0, 0, 1, 0
+                --   grupo_id:   1, 1, 1, 2, 2
+                SELECT
+                    tracker_code,
+                    inicio,
+                    fim,
+                    alarm_id,
+                    SUM(novo_grupo) OVER (
+                        PARTITION BY tracker_code 
+                        ORDER BY inicio
+                    ) AS grupo_id
+                FROM (
+                    -- ========================================================
+                    -- NÍVEL 3: DETECÇÃO DE GRUPOS SOBREPOSTOS
+                    -- ========================================================
+                    -- Marca com 1 quando um novo grupo começa (sem sobreposição)
+                    -- Marca com 0 quando alarme pertence ao grupo anterior (sobreposição)
+                    -- Lógica:
+                    --   - Se inicio > fim_anterior → GAP → novo_grupo = 1
+                    --   - Se inicio <= fim_anterior → SOBREPOSIÇÃO → novo_grupo = 0
+                    SELECT
+                        tracker_code,
+                        inicio,
+                        fim,
+                        alarm_id,
+                        fim_anterior,
+                        CASE 
+                            -- Primeiro alarme do tracker (não tem anterior)
+                            WHEN fim_anterior IS NULL THEN 1
+                            -- Alarme começa DEPOIS do anterior terminar (existe um GAP)
+                            WHEN inicio > fim_anterior THEN 1
+                            -- Alarme sobrepõe o anterior (sem GAP)
+                            ELSE 0
+                        END AS novo_grupo
+                    FROM (
+                        -- ================================================
+                        -- NÍVEL 2: ORDENAÇÃO E DETECÇÃO DE SOBREPOSIÇÃO
+                        -- ================================================
+                        -- Ordena alarmes por tracker_code e inicio
+                        -- Usa LAG() para trazer o 'fim' do alarme anterior
+                        -- Isso permite comparar se alarmes se sobrepõem
+                        SELECT
+                            tracker_code,
+                            inicio,
+                            fim,
+                            alarm_id,
+                            LAG(fim) OVER (
+                                PARTITION BY tracker_code 
+                                ORDER BY inicio
+                            ) AS fim_anterior
+                        FROM (
+                            -- ============================================
+                            -- NÍVEL 1 (MAIS INTERNO): EXTRAÇÃO DOS DADOS
+                            -- ============================================
+                            -- Busca todos os alarmes de trackers (TR-XXX)
+                            -- Extrai apenas TR-XXX do nome completo do teleobjeto
+                            -- Normaliza timestamps (usa NOW() se clear_date é NULL)
+                            SELECT
+                                -- Extrai 'TR-001' de 'TR-001 - Posição do Tracker'
+                                SPLIT_PART(toc.name, ' - ', 1) AS tracker_code,
+                                a.date_time AS inicio,
+                                -- Se alarme ainda não foi cleared, usa NOW()
+                                COALESCE(a.clear_date, NOW()) AS fim,
+                                a.id AS alarm_id
+                            FROM (
+                                {union_tabelas}
+                            ) a
+                            JOIN public.tele_object tobj ON a.tele_object_id = tobj.id
+                            JOIN public.tele_object_config toc ON tobj.tele_object_config_id = toc.id
+                            WHERE a.power_station_id = :usina_id
+                            AND toc.name LIKE 'TR-%'
+                        ) alarmes_tracker
+                    ) alarmes_ordenados
+                ) grupos_sobrepostos
+            ) grupos_numerados
+            GROUP BY tracker_code, grupo_id
+        ) intervalos_fundidos
         GROUP BY tracker_code
         ORDER BY duracao_total_minutos DESC
         LIMIT :limite
