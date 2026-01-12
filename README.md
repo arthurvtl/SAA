@@ -1,4 +1,4 @@
-# 🔆 Sistema de Análise de Alarmes (SAA)
+#Sistema de Análise de Alarmes (SAA)
 
 ## Descrição
 
@@ -6,11 +6,11 @@ Sistema de Business Intelligence desenvolvido em Python + Streamlit para anális
 
 ## Características Principais
 
-- ✅ **Queries SQL otimizadas** com índices e UNION ALL eficiente
-- ✅ **Código modular** separado em módulos específicos
-- ✅ **Clean Code** com funções pequenas e responsabilidade única
-- ✅ **Variáveis descritivas** que deixam claro o propósito
-- ✅ **Comentários claros** explicando funções, parâmetros e retornos
+-  **Queries SQL otimizadas** com índices e UNION ALL eficiente
+-  **Código modular** separado em módulos específicos
+-  **Clean Code** com funções pequenas e responsabilidade única
+-  **Variáveis descritivas** que deixam claro o propósito
+-  **Comentários claros** explicando funções, parâmetros e retornos
 
 ## Estrutura do Projeto
 
